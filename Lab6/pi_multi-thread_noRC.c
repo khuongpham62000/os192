@@ -2,8 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <assert.h>
 #define PRNG_BUFSZ 32
-#define NTHREADS 10000
+#define NTHREADS 32
+
+/* Mutex lock */
+pthread_mutex_t lock;
 
 /*Global Variable - Sum of inner point*/
 int SOIP = 0;
@@ -11,7 +15,6 @@ int SOIP = 0;
 /*Global Variable - Total point & Real point create*/
 int totalPoint = 0;
 int totalPointReal = 0;
-#define PointPerThread totalPoint/NTHREADS
 
 /* Function generate one point and return if it inside the circle */
 void RandomPointRun(struct random_data* arg) {
@@ -23,16 +26,20 @@ void RandomPointRun(struct random_data* arg) {
     r1 = r1 % 10000;
     r2 = r2 % 10000;
     int c = r1*r1 + r2*r2;
-    
-    totalPointReal++;
+
+    /* Critical Section */
+    pthread_mutex_lock(&lock);
+    ++totalPointReal;
     if (c <= 100000000)
         ++SOIP;
+    pthread_mutex_unlock(&lock);
 }
 
 /* Thread run here */
 void* thread_run(void* arg) {
-    for (int i = 0; i < PointPerThread; i++)
+    while (totalPointReal < totalPoint) {
         RandomPointRun((struct random_data*) arg);
+    }
     pthread_exit(NULL);
 }
 
@@ -48,10 +55,14 @@ int main(int argc, char* argv[])
         return -1;
     }
     totalPoint = atoi(argv[1]);
-    if (totalPoint < 10000){
-        printf("totalPoint >= 10000\n");
+    if (totalPoint < 1){
+        printf("totalPoint >= 1\n");
         return -1;
     }
+
+    /* Init mutex lock */
+    pthread_mutex_init(&lock , NULL);
+    int rc ;
 
     /* Set seed for random() */
     srandom(time(NULL));
@@ -69,19 +80,16 @@ int main(int argc, char* argv[])
         /* for each thread, initialize a PRNG, seed is random() */
         initstate_r(random(), &rand_statebufs[t], PRNG_BUFSZ, &rand_states[t]);
         /* and create the thread to generate random point from that PRNG */
-        pthread_create(&thread_ids[t], NULL, &thread_run, &rand_states[t]);
+        rc = pthread_create(&thread_ids[t], NULL, &thread_run, &rand_states[t]);
+        assert(rc == 0);
     }
     for (t = 0; t < NTHREADS; t++) {
-        pthread_join(thread_ids[t], NULL);
+        rc = pthread_join(thread_ids[t], NULL); assert(rc == 0);
     }
     /* Free memory */
     free(thread_ids);
     free(rand_states);
     free(rand_statebufs);
-
-    printf("%i\n", SOIP);
-    printf("%i\n", totalPointReal);
-    printf("%i\n", totalPoint);
 
     /* Calculate pi */
     float pi = (float)4 * (float)SOIP / (float)totalPointReal;
